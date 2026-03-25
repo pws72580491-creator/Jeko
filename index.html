@@ -405,6 +405,9 @@ let pendingDeleteId = null;
 // ── Firebase ──
 let fbDb=null, fbRef=null, fbListening=false;
 
+// ── AI 빠른입력 API 키 설정 (본인의 Anthropic API 키를 입력하세요) ──
+const ANTHROPIC_API_KEY = '';  // 예: 'sk-ant-api03-...'
+
 const FIREBASE_CONFIG = {
   apiKey:"AIzaSyAJlC68zrCMqABX7JGOrpaC_X_WTzqhxKU",
   authDomain:"inventory-639a0.firebaseapp.com",
@@ -725,6 +728,7 @@ function updateFinCalc() {
 // ── 렌더 전체 ──
 function renderAll() {
   buildSelects();
+  populateStatsYears();
   renderDashboard();
   renderInboundTable();
   renderOutboundTable();
@@ -798,7 +802,7 @@ function renderInboundTable() {
     return `<tr>
       <td>${fmtDate(r.date)}</td><td>${r.item}</td>
       <td>${r.tong!=null?r.tong:tong}</td>
-      <td>${(r.tong!=null?r.tong:tong)*getFlatPerTong(r.item)+(r.flat!=null?r.flat:flat)}</td>
+      <td>${r.flat!=null?r.flat:flat}</td>
       <td>${r.pcs.toLocaleString()}</td>
       <td>${r.price?r.price.toLocaleString()+'원':'-'}</td>
       <td>${r.amount?fmtMoney(r.amount):'-'}</td>
@@ -820,7 +824,7 @@ function renderOutboundTable() {
       <td>${fmtDate(r.date)}</td>
       <td>${r.staff||'-'}</td><td>${r.item}</td>
       <td>${r.tong!=null?r.tong:tong}</td>
-      <td>${(r.tong!=null?r.tong:tong)*getFlatPerTong(r.item)+(r.flat!=null?r.flat:flat)}</td>
+      <td>${r.flat!=null?r.flat:flat}</td>
       <td>${r.pcs.toLocaleString()}</td>
       <td>${r.amount?fmtMoney(r.amount):'-'}</td>
       <td><button onclick="askDelete(${r.id})" style="background:var(--red);color:#fff;border:none;border-radius:5px;padding:3px 8px;cursor:pointer;font-size:11px;">삭제</button>
@@ -851,7 +855,7 @@ function renderFinishedTable() {
       <td>${fmtDate(r.date)}</td>
       <td>${r.staff||'-'}</td><td>${r.item}</td>
       <td>${r.tong!=null?r.tong:tong}</td>
-      <td>${(r.tong!=null?r.tong:tong)*getFlatPerTong(r.item)+(r.flat!=null?r.flat:flat)}</td>
+      <td>${r.flat!=null?r.flat:flat}</td>
       <td>${r.pcs.toLocaleString()}</td>
       <td>${r.amount?fmtMoney(r.amount):'-'}</td>
       <td><button onclick="askDelete(${r.id})" style="background:var(--red);color:#fff;border:none;border-radius:5px;padding:3px 8px;cursor:pointer;font-size:11px;">삭제</button>
@@ -961,10 +965,14 @@ async function parseVoiceWithAI(text) {
 
 품목명은 목록에서 가장 가까운 것으로 매칭해줘. 단위가 없으면 0으로 해줘.`;
 
+  if(!ANTHROPIC_API_KEY) {
+    document.getElementById('voiceStatus').textContent = '⚠️ AI 분석을 사용하려면 코드 상단의 ANTHROPIC_API_KEY를 설정하세요.';
+    return;
+  }
   try {
     const res = await fetch('https://api.anthropic.com/v1/messages', {
       method:'POST',
-      headers:{'Content-Type':'application/json'},
+      headers:{'Content-Type':'application/json','x-api-key':ANTHROPIC_API_KEY,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
       body: JSON.stringify({
         model:'claude-sonnet-4-20250514',
         max_tokens:300,
@@ -1100,6 +1108,24 @@ async function confirmEdit() {
   t.memo  = document.getElementById('editMemo').value.trim();
   if(t.category==='raw'||t.category==='finished_out') {
     t.staff = document.getElementById('editStaff').value;
+  }
+
+  // make 수정 시 연결된 consumption 트랜잭션도 동기화 [Bug2 Fix]
+  if(t.category==='make') {
+    const src=FINISHED_SOURCE[item];
+    const autoKey='[자동] ';
+    const conIdx=(state.transactions||[]).findIndex(x=>x&&x.category==='consumption'&&x.date===t.date&&x.memo&&x.memo.startsWith(autoKey));
+    if(src) {
+      const need=Math.ceil(pcs*src.ratio);
+      const u=pcsToUnits(need,src.source);
+      if(conIdx>=0) {
+        Object.assign(state.transactions[conIdx],{date:t.date,item:src.source,tong:u.tong,flat:u.flat,pcs:need,memo:`[자동] ${item} 제작 원료`});
+      } else {
+        state.transactions.push({id:state.nextId++,type:'out',category:'consumption',date:t.date,item:src.source,tong:u.tong,flat:u.flat,pcs:need,price:0,amount:0,memo:`[자동] ${item} 제작 원료`});
+      }
+    } else if(conIdx>=0) {
+      state.transactions=state.transactions.filter((_,i)=>i!==conIdx);
+    }
   }
 
   await saveState();
