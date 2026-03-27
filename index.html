@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>🥚 계란 재고관리</title>
+
+  <!-- 폰트 -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Nanum+Gothic:wght@400;700;800&family=Black+Han+Sans&display=swap" rel="stylesheet">
+
+  <!-- 스타일 -->
+  <link rel="stylesheet" href="style.css">
+
+  <!-- 외부 라이브러리 -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+</head>
+<body>
+
+<header>
+  <div class="logo">🥚 <span>계란</span> 재고관리</div>
+  <div style="display:flex;align-items:center;gap:8px;">
+    <button onclick="openVoiceModal()" style="background:var(--yolk);border:none;border-radius:20px;padding:6px 12px;font-size:13px;font-weight:700;cursor:pointer;color:var(--brown);">✏️ 빠른입력</button>
+    <span id="fbStatusBtn" class="fb-status disconnected" onclick="showFbModal()">🔴 오프라인</span>
+  </div>
+</header>
+
+<nav id="topNav">
+  <button class="active" onclick="showPage('dashboard')">📊 대시보드</button>
+  <button onclick="showPage('inbound')">📥 입고</button>
+  <button onclick="showPage('outbound')">📤 원란출고</button>
+  <button onclick="showPage('make')">🏭 완제품제작</button>
+  <button onclick="showPage('finished')">📦 완제품출고</button>
+  <button onclick="showPage('stats')">📈 통계</button>
+</nav>
+
+<main>
+
+  <!-- 대시보드 -->
+  <div id="page-dashboard" class="page active">
+    <div class="stat-row">
+      <div class="stat-box s1"><div class="stat-label">🥚 원란 재고</div><div class="stat-value" id="dashRawStock">0</div><div class="stat-sub" id="dashRawSub">개</div></div>
+      <div class="stat-box s2"><div class="stat-label">📥 오늘 입고</div><div class="stat-value" id="dashTodayIn">0</div><div class="stat-sub" id="dashTodayInSub">개</div></div>
+      <div class="stat-box s3"><div class="stat-label">📤 오늘 출고</div><div class="stat-value" id="dashTodayOut">0</div><div class="stat-sub" id="dashTodayOutSub">개</div></div>
+      <div class="stat-box s4"><div class="stat-label">📦 완제품 재고</div><div class="stat-value" id="dashFinStock">0</div><div class="stat-sub" id="dashFinSub">개</div></div>
+    </div>
+    <div class="card">
+      <div class="card-title">📥 원란 재고 <button class="btn btn-sm btn-yolk" onclick="exportExcel()">📊 엑셀</button></div>
+      <div class="stock-grid" id="stockGridInbound"></div>
+    </div>
+    <div class="card">
+      <div class="card-title">📦 완제품 재고</div>
+      <div class="stock-grid" id="stockGridFinished"></div>
+    </div>
+    <div class="card">
+      <div class="card-title">📋 최근 거래 내역</div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>날짜</th><th>구분</th><th>품목</th><th>수량</th><th>금액</th><th></th></tr></thead>
+          <tbody id="recentTable"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- 입고 -->
+  <div id="page-inbound" class="page">
+    <div class="card">
+      <div class="card-title">📥 입고 등록</div>
+      <div class="unit-hint">📦 1통=150판 | 🥚 1판=30개</div>
+      <div class="form-grid">
+        <div class="form-group"><label>날짜</label><input type="date" id="inDate"></div>
+        <div class="form-group"><label>품목</label><select id="inItem"></select></div>
+        <div class="form-group"><label>통</label><input type="number" id="inQtyTong" value="0" min="0"></div>
+        <div class="form-group"><label>판</label><input type="number" id="inQtyFlat" value="0" min="0"></div>
+        <div class="form-group"><label>개</label><input type="number" id="inQtyEa" value="0" min="0"></div>
+        <div class="form-group"><label>단가(원/개)</label><input type="number" id="inPrice" placeholder="0"></div>
+        <div class="form-group" style="grid-column:span 2;"><label>메모</label><input type="text" id="inMemo" placeholder="선택사항"></div>
+      </div>
+      <div id="inCalcInfo" style="background:var(--shell-dark);border-radius:8px;padding:10px;margin-top:10px;font-size:13px;"></div>
+      <button class="btn btn-green" onclick="saveInbound()">📥 입고 저장</button>
+    </div>
+    <div class="card">
+      <div class="card-title">📋 입고 내역</div>
+      <div class="filter-row">
+        <select id="inFilterItem" onchange="renderInboundTable()"><option value="">전체 품목</option></select>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>날짜</th><th>품목</th><th>통</th><th>판</th><th>개수</th><th>단가</th><th>금액</th><th></th></tr></thead>
+          <tbody id="inboundTable"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- 원란 출고 -->
+  <div id="page-outbound" class="page">
+    <div class="card">
+      <div class="card-title">📤 원란 출고 등록</div>
+      <div class="unit-hint">📦 1통=150판 | 🥚 1판=30개 | 원란 재고에서 차감</div>
+      <div class="form-grid">
+        <div class="form-group"><label>날짜</label><input type="date" id="outDate"></div>
+        <div class="form-group"><label>품목</label><select id="outItem"></select></div>
+        <div class="form-group"><label>직원</label><select id="outStaff"><option value="">공통</option></select></div>
+        <div class="form-group"><label>통</label><input type="number" id="outQtyTong" value="0" min="0"></div>
+        <div class="form-group"><label>판</label><input type="number" id="outQtyFlat" value="0" min="0"></div>
+        <div class="form-group"><label>개</label><input type="number" id="outQtyEa" value="0" min="0"></div>
+        <div class="form-group"><label>단가(원/개)</label><input type="number" id="outPrice" placeholder="0"></div>
+        <div class="form-group" style="grid-column:span 2;"><label>메모</label><input type="text" id="outMemo" placeholder="선택사항"></div>
+      </div>
+      <div id="outCalcInfo" style="background:var(--shell-dark);border-radius:8px;padding:10px;margin-top:10px;font-size:13px;"></div>
+      <button class="btn btn-red" onclick="saveOutbound()">📤 출고 저장</button>
+    </div>
+    <div class="card">
+      <div class="card-title">📋 원란 출고 내역</div>
+      <div class="filter-row">
+        <select id="outFilterItem" onchange="renderOutboundTable()"><option value="">전체 품목</option></select>
+        <select id="outFilterStaff" onchange="renderOutboundTable()"><option value="">전체 직원</option></select>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>날짜</th><th>직원</th><th>품목</th><th>통</th><th>판</th><th>개수</th><th>금액</th><th></th></tr></thead>
+          <tbody id="outboundTable"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- 완제품 제작 -->
+  <div id="page-make" class="page">
+    <div class="card">
+      <div class="card-title">🏭 완제품 제작 등록</div>
+      <div class="unit-hint">🔄 원란 → 완제품 재고 전환 (원료 자동 차감)</div>
+      <div class="form-grid">
+        <div class="form-group"><label>날짜</label><input type="date" id="mkDate"></div>
+        <div class="form-group"><label>완제품 품목</label><select id="mkItem"></select></div>
+        <div class="form-group"><label>통</label><input type="number" id="mkQtyTong" value="0" min="0"></div>
+        <div class="form-group"><label>판</label><input type="number" id="mkQtyFlat" value="0" min="0"></div>
+        <div class="form-group"><label>개</label><input type="number" id="mkQtyEa" value="0" min="0"></div>
+        <div class="form-group" style="grid-column:span 2;"><label>메모</label><input type="text" id="mkMemo" placeholder="선택사항"></div>
+      </div>
+      <div id="mkCalcInfo" style="background:var(--shell-dark);border-radius:8px;padding:10px;margin-top:10px;font-size:13px;"></div>
+      <button class="btn btn-green" onclick="saveMake()">🏭 제작 저장</button>
+    </div>
+    <div class="card">
+      <div class="card-title">📋 완제품 제작 내역</div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>날짜</th><th>품목</th><th>제작량</th><th>원료차감</th><th>메모</th><th></th></tr></thead>
+          <tbody id="makeTable"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- 완제품 출고 -->
+  <div id="page-finished" class="page">
+    <div class="card">
+      <div class="card-title">📦 완제품 출고 등록</div>
+      <div class="unit-hint">📦 완제품 재고에서 차감 (제작 후 출고)</div>
+      <div class="form-grid">
+        <div class="form-group"><label>날짜</label><input type="date" id="finDate"></div>
+        <div class="form-group"><label>품목</label><select id="finItem"></select></div>
+        <div class="form-group"><label>직원</label><select id="finStaff"><option value="">공통</option></select></div>
+        <div class="form-group"><label>통</label><input type="number" id="finQtyTong" value="0" min="0"></div>
+        <div class="form-group"><label>판</label><input type="number" id="finQtyFlat" value="0" min="0"></div>
+        <div class="form-group"><label>개</label><input type="number" id="finQtyEa" value="0" min="0"></div>
+        <div class="form-group"><label>단가(원/개)</label><input type="number" id="finPrice" placeholder="0"></div>
+        <div class="form-group" style="grid-column:span 2;"><label>메모</label><input type="text" id="finMemo" placeholder="선택사항"></div>
+      </div>
+      <div id="finCalcInfo" style="background:var(--shell-dark);border-radius:8px;padding:10px;margin-top:10px;font-size:13px;"></div>
+      <button class="btn btn-red" onclick="saveFinished()">📦 출고 저장</button>
+    </div>
+    <div class="card">
+      <div class="card-title">📋 완제품 출고 내역</div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>날짜</th><th>직원</th><th>품목</th><th>통</th><th>판</th><th>개수</th><th>금액</th><th></th></tr></thead>
+          <tbody id="finishedTable"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- 통계 -->
+  <div id="page-stats" class="page">
+    <div class="card">
+      <div class="card-title">📈 통계</div>
+      <div class="filter-row">
+        <select id="statsYear" onchange="renderStats()"></select>
+        <select id="statsMonth" onchange="renderStats()">
+          <option value="0">전체월</option>
+          <option value="1">1월</option><option value="2">2월</option><option value="3">3월</option>
+          <option value="4">4월</option><option value="5">5월</option><option value="6">6월</option>
+          <option value="7">7월</option><option value="8">8월</option><option value="9">9월</option>
+          <option value="10">10월</option><option value="11">11월</option><option value="12">12월</option>
+        </select>
+      </div>
+      <div class="stat-row">
+        <div class="stat-box s2"><div class="stat-label">📥 입고 합계</div><div class="stat-value" id="statIn">0</div><div class="stat-sub">개</div></div>
+        <div class="stat-box s3"><div class="stat-label">📤 출고 합계</div><div class="stat-value" id="statOut">0</div><div class="stat-sub">개</div></div>
+        <div class="stat-box s2"><div class="stat-label">💰 입고 금액</div><div class="stat-value" id="statInAmt">0</div><div class="stat-sub">원</div></div>
+        <div class="stat-box s3"><div class="stat-label">💵 출고 금액</div><div class="stat-value" id="statOutAmt">0</div><div class="stat-sub">원</div></div>
+      </div>
+    </div>
+  </div>
+
+</main>
+
+<!-- 빠른입력 모달 -->
+<div class="modal-overlay" id="voiceModal">
+  <div class="modal">
+    <h3 style="margin-bottom:8px;font-family:'Black Han Sans',sans-serif;">✏️ 빠른 입력</h3>
+    <p style="font-size:12px;color:var(--muted);margin-bottom:12px;">예) 왕란 3통 2판 입고<br>예) 특란 5판 원란출고<br>예) 퓨왕 2판 완제품제작<br>예) 명품특란 1판 완제품출고</p>
+    <div style="display:flex;gap:6px;margin-bottom:10px;">
+      <input type="text" id="voiceTextInput" placeholder="입력 후 분석 버튼" style="flex:1;padding:10px;border:1.5px solid var(--border);border-radius:8px;font-size:14px;background:var(--shell);">
+      <button id="micBtn" onclick="startVoice()" style="background:var(--brown-light);color:#fff;border:none;border-radius:8px;padding:10px 12px;cursor:pointer;font-size:15px;" title="음성인식">🎤</button>
+      <button onclick="parseTextInput()" style="background:var(--brown);color:#fff;border:none;border-radius:8px;padding:10px 14px;cursor:pointer;font-weight:700;font-size:13px;">분석</button>
+    </div>
+    <div id="voiceStatus" style="font-size:12px;color:var(--muted);min-height:18px;margin-bottom:6px;"></div>
+    <div id="voiceResult" style="display:none;background:#E8F5E9;border-radius:8px;padding:12px;font-size:13px;margin-bottom:12px;"></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;">
+      <button onclick="closeVoiceModal()" style="padding:8px 15px;border:1px solid var(--border);border-radius:8px;cursor:pointer;">닫기</button>
+      <button id="voiceApplyBtn" onclick="applyVoiceResult()" style="display:none;background:var(--green);color:#fff;border:none;border-radius:8px;padding:8px 15px;font-weight:700;cursor:pointer;">✅ 적용</button>
+    </div>
+  </div>
+</div>
+
+<!-- Firebase 모달 -->
+<div class="modal-overlay" id="fbModal">
+  <div class="modal">
+    <h3 style="margin-bottom:15px;font-family:'Black Han Sans',sans-serif;">🔥 Firebase 연결</h3>
+    <p style="font-size:12px;color:var(--muted);margin-bottom:10px;">Firebase 설정이 코드에 포함되어 있습니다.<br>연결 문제 시 Firebase 콘솔에서 규칙을 확인하세요.</p>
+    <p style="font-size:11px;background:var(--shell-dark);padding:8px;border-radius:6px;word-break:break-all;">규칙 URL:<br>console.firebase.google.com/project/inventory-639a0/database/.../rules</p>
+    <p style="font-size:11px;margin-top:8px;color:var(--muted);">규칙: {".read":true, ".write":true} 게시 필요</p>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:15px;">
+      <button onclick="closeFbModal()" style="padding:8px 15px;border:1px solid var(--border);border-radius:8px;cursor:pointer;">닫기</button>
+      <button onclick="connectFirebase()" class="btn btn-sm btn-yolk">🔄 재연결</button>
+    </div>
+    <hr style="margin:15px 0;border:none;border-top:1px solid var(--border);">
+    <div style="font-size:11px;color:var(--muted);margin-bottom:8px;">⚠️ 아래 버튼은 모든 데이터를 삭제합니다.</div>
+    <button onclick="resetAllData()" style="width:100%;padding:10px;background:#fff;color:var(--red);border:1.5px solid var(--red);border-radius:8px;cursor:pointer;font-weight:700;font-size:13px;">🗑️ 전체 데이터 초기화</button>
+  </div>
+</div>
+
+<!-- 수정 모달 -->
+<div class="modal-overlay" id="editModal">
+  <div class="modal" style="max-height:90vh;overflow-y:auto;">
+    <h3 style="margin-bottom:15px;font-family:'Black Han Sans',sans-serif;">✏️ 내역 수정</h3>
+    <div class="form-grid">
+      <div class="form-group"><label>날짜</label><input type="date" id="editDate"></div>
+      <div class="form-group"><label>품목</label><select id="editItem"></select></div>
+      <div class="form-group" id="editStaffGroup"><label>직원</label><select id="editStaff"></select></div>
+      <div class="form-group"><label>통</label><input type="number" id="editTong" value="0" min="0"></div>
+      <div class="form-group"><label>판</label><input type="number" id="editFlat" value="0" min="0"></div>
+      <div class="form-group"><label>개</label><input type="number" id="editEa" value="0" min="0"></div>
+      <div class="form-group" id="editPriceGroup"><label>단가(원/개)</label><input type="number" id="editPrice" placeholder="0"></div>
+      <div class="form-group" style="grid-column:span 2;"><label>메모</label><input type="text" id="editMemo" placeholder="선택사항"></div>
+    </div>
+    <div id="editCalcInfo" style="background:var(--shell-dark);border-radius:8px;padding:10px;margin-top:10px;font-size:13px;"></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:15px;">
+      <button onclick="closeEditModal()" style="padding:8px 15px;border:1px solid var(--border);border-radius:8px;cursor:pointer;">취소</button>
+      <button onclick="confirmEdit()" style="padding:8px 15px;background:var(--green);color:#fff;border:none;border-radius:8px;cursor:pointer;font-weight:700;">✅ 저장</button>
+    </div>
+  </div>
+</div>
+
+<!-- 삭제 확인 모달 -->
+<div class="modal-overlay" id="deleteModal">
+  <div class="modal">
+    <h3 style="margin-bottom:10px;">🗑️ 삭제 확인</h3>
+    <p id="deleteModalMsg" style="font-size:13px;color:var(--muted);margin-bottom:15px;"></p>
+    <div style="display:flex;gap:8px;justify-content:flex-end;">
+      <button onclick="closeDeleteModal()" style="padding:8px 15px;border:1px solid var(--border);border-radius:8px;cursor:pointer;">취소</button>
+      <button onclick="confirmDelete()" style="padding:8px 15px;background:var(--red);color:#fff;border:none;border-radius:8px;cursor:pointer;font-weight:700;">삭제</button>
+    </div>
+  </div>
+</div>
+
+
+  <!-- 설정 (Firebase 키) -->
+  <script src="config.js"></script>
+  <!-- 앱 로직 -->
+  <script src="app.js"></script>
+</body>
+</html>
